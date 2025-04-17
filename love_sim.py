@@ -364,7 +364,7 @@ if st.button("🔮 시뮬레이션 실행!"):
     elif relationship_prob_6m < 35:
         result_comment = f"{pronoun_target}도 {pronoun_user}을 궁금해할지 몰라요! 가능성이 보이니 힘내봐요! 💪"
     elif relationship_prob_6m < 60:
-        result_comment = f"오! {pronoun_target}이 {pronoun_user}에게 다가오고 있을지도? {pronoun_target}가 웃고 있어요! 😊"
+        result_comment = f"오! {pronoun_target}가 {pronoun_user}에게 다가오고 있을지도? {pronoun_target}가 웃고 있어요! 😊"
     else:
         result_comment = f"와우! {pronoun_target}가 {pronoun_user}을 향해 오고 있어요! {pronoun_target}의 환한 미소! 곧 좋은 소식 기대할게요! 💖"
     st.markdown(f"**{result_comment}**") # 결과 코멘트 표시
