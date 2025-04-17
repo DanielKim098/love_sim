@@ -1,13 +1,60 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont  # 이미지 생성을 위해 추가
+import io  # 이미지를 메모리에서 다루기 위해 추가
+import sqlite3 # 누적 카운트를 위해 추가 (st.connection에서 내부적으로 사용)
+import os # 파일 경로 처리를 위해 추가
 
 # --- 페이지 기본 설정 ---
-st.set_page_config(page_title="연애 확률 시뮬레이터 v2.1", page_icon="💖")
+st.set_page_config(page_title="연애 확률 시뮬레이터 v2.2", page_icon="💖")
 
-st.title("💖 연애 확률 시뮬레이터 v2.1")
-st.caption("필터링 세분화 & 인스타 공유 최적화 (feat. 책 홍보!)")
+st.title("💖 연애 확률 시뮬레이터 v2.2")
+st.caption("결과 이미지 공유✨ + 캐릭터 반응🤩 + 누적 카운트🔥")
 st.markdown("---")
+
+# --- NEW: 누적 카운트 표시 ---
+# Streamlit Secrets 또는 환경 변수에 DATABASE_URL 설정 필요 (로컬 테스트용 임시 경로)
+# 예: secrets.toml 파일에 [connections.sim_counter_db] url = "sqlite:///./simulation_counter.db" 추가
+# 또는 직접 경로 지정 (단, Streamlit Cloud 배포 시 이 방식은 초기화될 수 있음)
+DB_PATH = "simulation_counter.db"
+
+# 데이터베이스 연결 설정 (st.connection 사용 권장)
+# st.connection은 Streamlit 1.30.0 이상 필요
+try:
+    conn = st.connection("sim_counter_db", type="sql", url=f"sqlite:///{DB_PATH}")
+    with conn.session as s:
+        s.execute("""
+            CREATE TABLE IF NOT EXISTS counts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                count INTEGER DEFAULT 0
+            );
+        """)
+        # 초기 데이터 삽입 (최초 실행 시)
+        result = s.execute("SELECT count FROM counts WHERE id = 1;").fetchone()
+        if result is None:
+            s.execute("INSERT INTO counts (id, count) VALUES (1, 0);")
+            s.commit()
+
+    # 현재 카운트 가져오기
+    current_count_result = conn.query("SELECT count FROM counts WHERE id = 1;", ttl=0) # 캐시 사용 안 함
+    # DataFrame에서 값 추출 확인
+    if not current_count_result.empty:
+        current_count = current_count_result['count'].iloc[0]
+    else:
+        # 만약 테이블은 있으나 데이터가 없다면 0으로 초기화 (예외 처리)
+        with conn.session as s:
+            s.execute("INSERT OR IGNORE INTO counts (id, count) VALUES (1, 0);")
+            s.commit()
+        current_count = 0
+
+    st.info(f"🔥 지금까지 총 **{current_count:,}번**의 연애 확률이 시뮬레이션 되었습니다!")
+
+except Exception as e:
+    st.warning(f"누적 카운트 기능을 불러오는 중 오류 발생: {e}. 로컬 환경에서는 정상 작동하지 않을 수 있습니다.")
+    current_count = 0 # 오류 시 카운트 0으로 가정
+
+st.markdown("---") # 구분선 추가
 
 st.write("""
 새로운 사람을 만나는 것과 연애를 시작하는 것은 조금 다른 문제죠? 🤔\n
@@ -18,8 +65,8 @@ st.write("""
 
 st.markdown("---")
 
-# --- 변수 입력 (카테고리별 확장 & 필터링 세분화) ---
-
+# --- 변수 입력 (기존과 동일) ---
+# (기존의 st.expander 내용들은 여기에 그대로 유지)
 with st.expander("1️⃣ 기본 정보 & 자기 인식 (Baseline)", expanded=True):
     col1_1, col1_2 = st.columns(2)
     with col1_1:
@@ -93,12 +140,13 @@ with st.expander("5️⃣ 활동 & 라이프스타일 (Activities & Lifestyle)")
     activity_freq = st.select_slider("선택한 활동 참여 빈도", ["월 1회 미만", "월 1-2회", "주 1회", "주 2회 이상"], value="월 1-2회")
     new_activity_try = st.select_slider("새로운 활동 시도 적극성", ["안 함", "연 1-2회", "분기 1회", "적극적"], value="연 1-2회")
 
+
 st.markdown("---")
 
-# --- 시뮬레이션 로직 (필터링 가중치 적용) ---
+# --- 시뮬레이션 로직 (기존과 동일) ---
 def calculate_base_score_v2(params):
     score = 50
-    # ... (다른 기본 정보, 환경, 네트워크 점수 계산 로직은 v2와 동일하게 적용) ...
+    # ... (기존 로직 유지) ...
     score += (params['appearance'] - 5) * 3.0
     if params['activity_range'] == "집-회사 위주": score -= 5
     elif params['activity_range'] == "시내/핫플 자주 감": score += 3
@@ -113,11 +161,8 @@ def calculate_base_score_v2(params):
     score += (params['resilience'] - 3) * 2.0
     score += (params['confidence'] - 6) * 2.5
     score += (params['openness'] - 3) * 2.0
-
-    # 필터링 페널티 (가중치 적용)
     filter_penalty = (params['high_filters'] * 5.0) + (params['medium_filters'] * 2.0) + (params['low_filters'] * 0.5)
     score -= filter_penalty
-
     return max(0, min(100, score))
 
 def calculate_encounter_prob_v2(base_score, params):
@@ -160,6 +205,74 @@ def apply_time_decay_v2(prob, months):
     else: decay_factor = 1.3
     return min(99.0, prob * decay_factor)
 
+# --- NEW: 결과 이미지 생성 함수 ---
+def create_result_image(encounter_prob, relationship_prob, character_emoji, book_promo=True):
+    width, height = 600, 400
+    background_color = (255, 240, 245) # 연한 핑크 배경
+    img = Image.new('RGB', (width, height), color=background_color)
+    d = ImageDraw.Draw(img)
+
+    # 폰트 설정 (Streamlit Cloud에서 사용 가능한 폰트 확인 필요, 예: Noto Sans KR)
+    # 로컬에서는 설치된 폰트 경로 지정 가능
+    # 여기서는 기본 폰트 사용 (Pillow 내장)
+    try:
+        # Noto Sans KR 같은 한글 폰트 로드 시도 (파일 경로 필요)
+        # font_path = "path/to/NotoSansKR-Bold.otf"
+        # title_font = ImageFont.truetype(font_path, 36)
+        # text_font = ImageFont.truetype(font_path, 24)
+        # small_font = ImageFont.truetype(font_path, 18)
+        # emoji_font = ImageFont.truetype(font_path, 60) # 이모지 크기
+
+        # 기본 폰트로 대체 (한글 깨질 수 있음)
+        title_font = ImageFont.load_default().font # 기본 폰트는 크기 조절 불가
+        text_font = ImageFont.load_default().font
+        small_font = ImageFont.load_default().font
+        emoji_font = ImageFont.load_default().font
+
+        # 폰트 로딩 실패 시 예외처리 필요
+    except IOError:
+        st.error("폰트 파일을 로드할 수 없습니다. 기본 폰트를 사용합니다.")
+        title_font = ImageFont.load_default()
+        text_font = ImageFont.load_default()
+        small_font = ImageFont.load_default()
+        emoji_font = ImageFont.load_default()
+
+    # 제목
+    title_text = "💖 나의 연애 확률 (6개월) 💖"
+    # title_bbox = d.textbbox((0, 0), title_text, font=title_font)
+    # title_x = (width - (title_bbox[2] - title_bbox[0])) / 2
+    d.text((50, 30), title_text, fill=(255, 20, 147), font=title_font) # 딥핑크
+
+    # 결과 확률
+    prob_text_meet = f"✨ 새로운 만남: {encounter_prob:.1f}%"
+    prob_text_love = f"💖 연애 시작: {relationship_prob:.1f}%"
+    d.text((50, 100), prob_text_meet, fill=(0, 0, 0), font=text_font)
+    d.text((50, 140), prob_text_love, fill=(0, 0, 0), font=text_font)
+
+    # 캐릭터 이모지
+    # emoji_bbox = d.textbbox((0,0), character_emoji, font=emoji_font)
+    # emoji_x = width - (emoji_bbox[2] - emoji_bbox[0]) - 50
+    d.text((450, 90), character_emoji, fill=(0, 0, 0), font=emoji_font)
+
+    # 책 홍보 문구 (선택적)
+    if book_promo:
+        promo_text1 = "더 자세한 원리는?"
+        promo_text2 = "『시뮬레이션된 베스트셀러』에서 확인!"
+        hashtag_text = "#연애시뮬레이터 #시뮬레이션된베스트셀러"
+        d.text((50, 250), promo_text1, fill=(105, 105, 105), font=small_font) # 회색
+        d.text((50, 280), promo_text2, fill=(105, 105, 105), font=small_font)
+        d.text((50, 320), hashtag_text, fill=(255, 20, 147), font=small_font) # 딥핑크
+
+    # 앱 출처 표시
+    app_credit = "love-sim.streamlit.app (가상)" # 실제 앱 주소로 변경
+    d.text((width - 200, height - 30), app_credit, fill=(150, 150, 150), font=small_font)
+
+    # 이미지를 BytesIO 객체로 변환
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr = img_byte_arr.getvalue()
+    return img_byte_arr
+
 # --- 입력값 정리 ---
 params = {
     'solo_duration': solo_duration, 'gender': gender, 'age_group': age_group, 'exp_level': exp_level,
@@ -167,14 +280,25 @@ params = {
     'style_effort': style_effort, 'skin_hair_care': skin_hair_care, 'body_care_effort': body_care_effort, 'manner_effort': manner_effort, 'health_care': health_care,
     'activity_range': activity_range, 'work_gender_ratio': work_gender_ratio, 'network_size': network_size, 'network_quality': network_quality, 'living_env': living_env,
     'proactiveness': proactiveness, 'resilience': resilience, 'confidence': confidence, 'openness': openness,
-    'high_filters': high_filters, 'medium_filters': medium_filters, 'low_filters': low_filters, # 세분화된 필터 사용
+    'high_filters': high_filters, 'medium_filters': medium_filters, 'low_filters': low_filters,
     'apply_sim_result': apply_sim_result,
     'activities_options': activities_options, 'activity1': activity1, 'activity2': activity2, 'activity_freq': activity_freq, 'new_activity_try': new_activity_try
 }
 
 # --- 결과 계산 및 출력 ---
 if st.button("🔮 시뮬레이션 실행!"):
-    # 결과 표시 영역 (스크린샷 찍기 좋게 상단 배치)
+
+    # --- NEW: 누적 카운트 업데이트 ---
+    try:
+        with conn.session as s:
+            s.execute("UPDATE counts SET count = count + 1 WHERE id = 1;")
+            s.commit()
+        # 페이지 새로고침 없이 카운트 즉시 반영 (선택적)
+        # current_count += 1
+        # st.experimental_rerun() # 또는 최신 버전에서는 st.rerun()
+    except Exception as e:
+        st.warning(f"누적 카운트 업데이트 중 오류 발생: {e}")
+
     st.subheader("📊 기간별 예측 확률 변화")
     base_score = calculate_base_score_v2(params)
     encounter_prob_base = calculate_encounter_prob_v2(base_score, params)
@@ -184,33 +308,51 @@ if st.button("🔮 시뮬레이션 실행!"):
     for months in [3, 6, 12]:
         encounter_p = apply_time_decay_v2(encounter_prob_base, months)
         relationship_p = apply_time_decay_v2(relationship_prob_base, months)
-        relationship_p = min(encounter_p, relationship_p)
+        relationship_p = min(encounter_p, relationship_p) # 연애 확률이 만남 확률보다 높을 수 없음
         results['기간'].append(f"{months}개월")
         results['만남 확률 (%)'].append(round(encounter_p, 1))
         results['연애 시작 확률 (%)'].append(round(relationship_p, 1))
 
     results_df = pd.DataFrame(results).set_index('기간')
+    relationship_prob_6m = results_df.loc['6개월', '연애 시작 확률 (%)'] # 핵심 결과 (6개월)
 
-    col_res1, col_res2 = st.columns(2) # 메트릭을 가로로 배치
+    # --- NEW: 캐릭터 반응 ---
+    if relationship_prob_6m < 15:
+        character_emoji = "😭"
+        result_comment = "아직은 조금 더 노력이 필요해요! 🌱"
+    elif relationship_prob_6m < 35:
+        character_emoji = "🤔"
+        result_comment = "가능성이 보입니다! 조금만 더 힘내봐요! 💪"
+    elif relationship_prob_6m < 60:
+        character_emoji = "😊"
+        result_comment = "오! 꽤 높은 확률이에요! 좋은 예감이 드는데요? ✨"
+    else:
+        character_emoji = "🥰"
+        result_comment = "와우! 연애 임박! 곧 좋은 소식 기대할게요! 💖"
+
+    st.markdown(f"### {character_emoji} {result_comment}") # 결과 코멘트 표시
+    st.markdown("---") # 구분선
+
+    col_res1, col_res2 = st.columns(2)
     with col_res1:
         st.metric("🌟 만남 확률 (6개월)", f"{results_df.loc['6개월', '만남 확률 (%)']:.1f}%")
     with col_res2:
-        st.metric("💖 연애 시작 확률 (6개월)", f"{results_df.loc['6개월', '연애 시작 확률 (%)']:.1f}%")
+        st.metric("💖 연애 시작 확률 (6개월)", f"{relationship_prob_6m:.1f}%")
 
     st.line_chart(results_df)
-    with st.expander("📅 기간별 상세 확률 보기"): # 데이터프레임은 접어두기
+    with st.expander("📅 기간별 상세 확률 보기"):
         st.dataframe(results_df)
 
     st.markdown("---")
     st.subheader("💡 주요 영향 요인 분석")
     st.write(f"- **만남 기회:** 주로 **활동**('{params['activity1']}', '{params['activity2']}')과 **적극성**('{params['proactiveness']}')이 영향을 미쳐요.")
     st.write(f"- **관계 발전:** **매력 관리**(외모:{params['appearance']:.1f}, 스타일:{params['style_effort']} 등), **자신감**({params['confidence']}점), 그리고 **필터링**(가중치:{total_filters_weighted:.1f}점)이 중요해요.")
-    if total_filters_weighted > 15: # 예시: 필터 가중치가 높을 때
+    if total_filters_weighted > 15:
         st.warning(f"🚨 특히 **높은 장벽 필터({params['high_filters']}개)**가 많으면 연애 시작 확률이 크게 낮아질 수 있어요! 한두 개만 줄여보는 건 어때요?")
 
     st.markdown("---")
     st.subheader("🎯 추천 액션 레시피")
-    relationship_prob_6m = results_df.loc['6개월', '연애 시작 확률 (%)'] # 6개월 기준
+    # (기존 추천 액션 레시피 로직 유지)
     if relationship_prob_6m < 20:
         st.info("🌱 **씨앗 뿌리기 단계:** 지금은 만남 기회를 늘리는 게 중요해요! '주짓수'나 '러닝 크루' 같은 새로운 활동에 도전해보거나, '소개 가능한 친구' 수를 늘려보는 건 어떨까요? **'높은 장벽 필터'**도 점검해보세요!")
     elif relationship_prob_6m < 50:
@@ -220,24 +362,41 @@ if st.button("🔮 시뮬레이션 실행!"):
 
     st.markdown("---")
 
-    # --- 7. 결과 공유 (인스타 최적화 & 책 연계) ---
+    # --- 7. 결과 공유 (인스타 최적화 - 이미지 생성 & 다운로드) ---
     st.subheader("💌 결과 공유 & 더 알아보기")
-    st.info("👇 아래 텍스트를 복사해서 인스타 스토리에 공유해보세요! (결과 화면 스크린샷과 함께!)")
 
-    share_text_insta = f"""
-    🔮 내 6개월 연애 확률은? 🔮
-    만남: {results_df.loc['6개월', '만남 확률 (%)']:.1f}% / 시작: {results_df.loc['6개월', '연애 시작 확률 (%)']:.1f}%
-    🔥 '{params['activity1']}' 활동 선택! 확률 UP! 🔥
-    🤔 근데 왜 이런 결과가? 비밀은 책에! #시뮬레이션된베스트셀러
-    👇 너도 해봐! 앱 링크는 스토리에!
-    #연애시뮬레이터 #연애확률 #궁금하면책으로
-    """
-    st.code(share_text_insta, language=None) # language=None으로 하면 복사 버튼 생김
+    # --- NEW: 결과 이미지 생성 및 다운로드 버튼 ---
+    try:
+        result_image_bytes = create_result_image(
+            results_df.loc['6개월', '만남 확률 (%)'],
+            relationship_prob_6m,
+            character_emoji
+        )
+        st.image(result_image_bytes, caption="✨ 인스타 스토리에 공유할 내 결과 이미지 ✨")
+        st.download_button(
+            label="💾 결과 이미지 다운로드",
+            data=result_image_bytes,
+            file_name=f"my_love_chance_{relationship_prob_6m:.0f}.png",
+            mime="image/png"
+        )
+        st.info("☝️ 이미지를 다운로드해서 인스타그램 스토리에 공유해보세요!")
+    except Exception as e:
+        st.error(f"결과 이미지 생성 중 오류 발생: {e}. 텍스트로 공유해주세요.")
+        # 이미지 생성 실패 시 기존 텍스트 공유 방식 유지
+        st.info("👇 아래 텍스트를 복사해서 인스타 스토리에 공유해보세요! (결과 화면 스크린샷과 함께!)")
+        share_text_insta = f"""
+        🔮 내 6개월 연애 확률은? 🔮
+        만남: {results_df.loc['6개월', '만남 확률 (%)']:.1f}% / 시작: {relationship_prob_6m:.1f}% {character_emoji}
+        🔥 '{params['activity1']}' 활동 선택! 확률 UP! 🔥
+        🤔 근데 왜 이런 결과가? 비밀은 책에! #시뮬레이션된베스트셀러
+        👇 너도 해봐! [앱링크] #연애시뮬레이터 #연애확률 #궁금하면책으로
+        """
+        st.code(share_text_insta, language=None)
 
-    # --- 책 판매 연계 ---
+    # --- 책 판매 연계 (기존과 동일) ---
     st.markdown("---")
     st.subheader("📚 변수 설정의 비밀? 책에서 확인하세요!")
-    # st.image("your_book_cover_image.jpg", width=150) # 책 표지 이미지 파일 경로 넣기
+    # st.image("your_book_cover_image.jpg", width=150) # 책 표지 이미지
     st.write(f"""
     이 시뮬레이터는 『시뮬레이션된 베스트셀러』에 담긴 **데이터 기반 의사결정 원리**의 맛보기 버전입니다.\n
     - **외모, 활동, 필터링... 각 변수의 정확한 가중치**는 어떻게 설정되었을까요?
@@ -246,14 +405,13 @@ if st.button("🔮 시뮬레이션 실행!"):
     단순히 확률을 아는 것을 넘어, 당신의 **삶 전체를 설계하는 방법**을 배우고 싶다면?\n
     **모든 핵심 원리와 설계 비밀**은 책 속에 담겨 있습니다.
     """)
-    # 실제 책 구매 링크로 바꿔야 함
-    book_purchase_link = "https://www.yes24.com" # 예시 링크
+    book_purchase_link = "https://www.yes24.com" # 실제 링크로 변경
     st.link_button("👉 『시뮬레이션된 베스트셀러』 구매하고 설계자 되기!", book_purchase_link)
 
-    # --- 작가의 한마디 (시뮬레이션 후 표시) ---
+    # --- 작가의 한마디 (기존과 동일) ---
     st.text_area(
         "작가의 한마디 📝 (밸런스 잡기!)",
-        "저는 지금의 아내와 10년간 연애 후 10년간 결혼 생활을 해 왔습니다. 어찌 보면 연애 세포는 제로에 가까운 사람이지만, 이 시뮬레이터는 '이렇게도 생각해볼 수 있다'는 사고 확장을 위한 것입니다.\n\n"
+        "저는 10년간 연애 후 10년간 결혼 생활을 해 왔습니다. 어찌 보면 연애 세포는 제로에 가까운 사람이지만, 이 시뮬레이터는 '이렇게도 생각해볼 수 있다'는 사고 확장을 위한 것입니다.\n\n"
         "타로카드처럼 재미로 보시되, 절대적 진리로 믿진 마세요! 여러분의 매력, 노력, 그리고 시뮬레이션에 없는 '우연한 만남'의 가능성이 훨씬 중요합니다. 단골 카페에서, 혹은 홍대 펍에서 운명이 기다릴 수도 있으니까요 😉\n\n"
         "중요한 건 데이터로 사고하는 '연습'을 통해, 내 삶의 변수를 직접 설계해보려는 '의지'입니다. 자, 이제 어떤 변수를 바꿔보시겠어요?",
         height=200,
