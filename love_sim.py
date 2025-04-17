@@ -411,7 +411,7 @@ if st.button("🔮 시뮬레이션 실행!"):
     내가 변수 조정해서 {pronoun_target} 웃게 만들기 성공?! ✨
     🔥 '{params['activity1']}' 활동 덕분인가? 🔥
     🤔 확률 올리는 비법 궁금하면? 👉 책으로!
-    👇 너도 해봐! [앱 링크 입력]
+    👇 너도 해봐! [https://lovesim.streamlit.app/]
     #연애시뮬레이터 #시뮬레이션된베스트셀러 #연애확률 #{pronoun_target}기다려 #내캐릭터는귀엽지
     """
     st.code(share_text_insta, language=None) # language=None으로 복사 버튼 생성
