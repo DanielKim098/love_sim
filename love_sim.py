@@ -314,7 +314,10 @@ if st.button("🔮 시뮬레이션 실행!"):
     relationship_prob_base = calculate_relationship_prob_v2(encounter_prob_base, base_score, params)
 
     results = {'기간': [], '만남 확률 (%)': [], '연애 시작 확률 (%)': []}
-    for months in [3, 6, 12]:
+    # <<< 원하는 순서를 미리 정의합니다 >>>
+    period_order = ["3개월", "6개월", "12개월"]
+
+    for months in [3, 6, 12]: # 계산 순서는 그대로 유지
         encounter_p = apply_time_decay_v2(encounter_prob_base, months)
         relationship_p = apply_time_decay_v2(relationship_prob_base, months)
         relationship_p = min(encounter_p, relationship_p) # 연애 확률 > 만남 확률 방지
@@ -322,8 +325,17 @@ if st.button("🔮 시뮬레이션 실행!"):
         results['만남 확률 (%)'].append(round(encounter_p, 1))
         results['연애 시작 확률 (%)'].append(round(relationship_p, 1))
 
-    results_df = pd.DataFrame(results).set_index('기간')
-    relationship_prob_6m = results_df.loc['6개월', '연애 시작 확률 (%)'] # 6개월 확률이 기준
+    # <<< 데이터프레임을 먼저 만들고 >>>
+    results_df = pd.DataFrame(results)
+
+    # <<< '기간' 컬럼을 순서가 있는 카테고리형으로 변환합니다 >>>
+    results_df['기간'] = pd.Categorical(results_df['기간'], categories=period_order, ordered=True)
+
+    # <<< 그 다음에 인덱스로 설정합니다 >>>
+    results_df = results_df.set_index('기간')
+
+    # 6개월 확률 값 가져오는 것은 문제 없이 동일하게 작동합니다.
+    relationship_prob_6m = results_df.loc['6개월', '연애 시작 확률 (%)']
 
     # --- 3. 성별 기반 캐릭터 반응 표시 ---
     user_gender = params['gender'] # 사용자가 선택한 성별
